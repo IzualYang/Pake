@@ -1,0 +1,60 @@
+name: Download and Convert Icon
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Enter the domain name or URL to download the icon'
+        required: true
+
+jobs:
+  download-convert-icon:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Extract domain name from URL
+      run: echo "DOMAINNAME=$(echo "${{ github.event.inputs.domain }}" | tr '[:upper:]' '[:lower:]' | awk -F[/:] '{ if ($1 == "http" || $1 == "https" || $1 == "ftp") { print $4 } else { print $1 } }' )" >> $GITHUB_ENV
+
+    - name: Install ImageMagick
+      run: sudo apt-get install -y imagemagick
+
+    - name: Download icon
+      run: curl -o "input/${{env.DOMAINNAME}}.ico" "https://icons.duckduckgo.com/ip3/${{env.DOMAINNAME}}.ico"
+
+    - name: Identify file format
+      run: |
+        FILEFORMAT=$(identify -format '%m' input/${{env.DOMAINNAME}}.ico)
+        echo "FILEFORMAT=${FILEFORMAT:0:3}" >> $GITHUB_ENV
+        
+    - name: Move ICO file to directory
+      if: ${{ env.FILEFORMAT == 'ICO' }} 
+      run: mv "input/${{env.DOMAINNAME}}.ico" "ico/${{env.DOMAINNAME}}.ico"
+      
+    - name: Convert to ICO
+      if: ${{ env.FILEFORMAT == 'PNG' || env.FILEFORMAT == 'JPE' }}
+      run: convert -background transparent "input/${{env.DOMAINNAME}}.ico" -define icon:auto-resize=16,24,32,48,64,72,96,128,256 "ico/${{env.DOMAINNAME}}.ico"
+
+    - name: Extract branch name
+      run: echo "CURRBRANCH=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+
+    - name: Check output file, update list and cleanup
+      run: |
+        if test -f "ico/${{env.DOMAINNAME}}.ico" ; then
+          if test -f "ico/list.md" ; then
+            mv ico/list.md ico/listtmp.md
+          fi
+          echo "- https://raw.githubusercontent.com/${{github.repository}}/${{env.CURRBRANCH}}/ico/${{env.DOMAINNAME}}.ico" >> ico/listtmp.md
+          sort ico/listtmp.md | uniq >> ico/list.md
+          rm -f input/${{env.DOMAINNAME}}.ico
+          rm -f ico/listtmp.md
+        fi
+        
+    - name: update repo
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "GitHub Actions"
+        git add ico/list.md
+        git add ico/${{env.DOMAINNAME}}.ico 
+        git commit -m "Add ${{env.DOMAINNAME}}.ico" || :
+        git push || :
